@@ -1,0 +1,12 @@
+[build-system]
+requires = []
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legacy-modernization-factory"
+version = "0.1.0"
+description = "Local MVP for governed legacy-to-AWS sandbox planning"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

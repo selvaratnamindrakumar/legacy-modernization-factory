@@ -1,0 +1,13 @@
+{
+  "name": "legacy-order-service",
+  "description": "Java service that consumes orders, publishes fulfilment events, and reads partner files.",
+  "runtime": "java-8",
+  "deployment": "vm",
+  "interfaces": [
+    {"type": "kafka", "direction": "consume", "name": "orders"},
+    {"type": "rabbitmq", "direction": "publish", "name": "fulfilment-events"},
+    {"type": "smb", "direction": "read", "name": "partner-files", "path": "\\\\fileserver\\orders"}
+  ],
+  "availability": "business-hours",
+  "data_classification": "internal"
+}
