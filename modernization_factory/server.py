@@ -70,6 +70,51 @@ def load_dynamodb_data(tag: str | None) -> list[dict[str, Any]]:
     return [dict(item, source="DYNAMODB") for item in response.get("Items", [])]
 
 
+def load_rds_data(tag: str | None) -> list[dict[str, Any]]:
+    """Query Aurora PostgreSQL through the RDS Data API in AWS mode."""
+    try:
+        import boto3
+    except ImportError as exc:
+        raise RuntimeError("Install boto3 before using AWS mode: python -m pip install boto3") from exc
+
+    session = boto3.Session(profile_name=os.getenv("AWS_PROFILE") or None, region_name=os.getenv("AWS_REGION", "us-east-1"))
+    client = session.client("rds-data")
+    resource_arn = os.getenv("RDS_RESOURCE_ARN")
+    secret_arn = os.getenv("RDS_SECRET_ARN")
+    database = os.getenv("RDS_DATABASE", "legacydb")
+    if not resource_arn or not secret_arn:
+        raise RuntimeError("Set RDS_RESOURCE_ARN and RDS_SECRET_ARN before using the RDS provider")
+
+    sql = "SELECT id, tacs, name, status FROM legacy_records"
+    parameters = []
+    if tag:
+        sql += " WHERE tacs = :tacs"
+        parameters = [{"name": "tacs", "value": {"stringValue": tag}}]
+    sql += " ORDER BY id LIMIT 100"
+    response = client.execute_statement(
+        resourceArn=resource_arn,
+        secretArn=secret_arn,
+        database=database,
+        sql=sql,
+        parameters=parameters,
+        includeResultMetadata=True,
+    )
+    columns = [item.get("name") for item in response.get("columnMetadata", [])]
+    records = []
+    for row in response.get("records", []):
+        record = {}
+        for index, field in enumerate(row):
+            if "isNull" in field:
+                value = None
+            else:
+                value = next((field[key] for key in ("stringValue", "longValue", "doubleValue", "booleanValue") if key in field), None)
+            if index < len(columns) and columns[index]:
+                record[columns[index]] = value
+        record["source"] = "RDS"
+        records.append(record)
+    return records
+
+
 def page(plan: dict[str, Any]) -> str:
     app = plan["application"]
     rows = "".join(
@@ -112,9 +157,14 @@ class Handler(BaseHTTPRequestHandler):
             tag = (query.get("tags") or query.get("tacs") or [None])[0]
             source = (query.get("source") or [None])[0]
             try:
-                records = load_dynamodb_data(tag) if source == "dynamodb" and os.getenv("MODERNIZATION_DATA_MODE") == "aws" else load_data(source, tag)
-            except RuntimeError as exc:
-                self.send_error(502, str(exc))
+                if os.getenv("MODERNIZATION_DATA_MODE") == "aws" and source == "dynamodb":
+                    records = load_dynamodb_data(tag)
+                elif os.getenv("MODERNIZATION_DATA_MODE") == "aws" and source == "rds":
+                    records = load_rds_data(tag)
+                else:
+                    records = load_data(source, tag)
+            except Exception as exc:
+                self.send_error(502, f"AWS data provider failed: {type(exc).__name__}: {exc}")
                 return
             payload = {"source": source or "s3+rds", "tag": tag, "count": len(records), "records": records}
             self.send_body(json.dumps(payload, indent=2), "application/json")

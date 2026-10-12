@@ -7,6 +7,9 @@ name = "legacy-modernization-factory"
 version = "0.1.0"
 description = "Local MVP for governed legacy-to-AWS sandbox planning"
 requires-python = ">=3.10"
+dependencies = [
+    "boto3[crt]>=1.34",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
