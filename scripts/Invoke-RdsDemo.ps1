@@ -26,6 +26,18 @@ function Invoke-Aws([string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "AWS CLI command failed with exit code $LASTEXITCODE" }
 }
 
+function Get-AwsText([string[]]$Arguments) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $result = & aws @Arguments 2>$null
+        if ($LASTEXITCODE -ne 0) { return "" }
+        return (($result -join "`n").Trim())
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
 Write-Host "Creating or reusing subnet group..."
 try {
     Invoke-Aws @("rds", "describe-db-subnet-groups", "--profile", $Profile, "--region", $Region, "--db-subnet-group-name", $subnetGroup, "--output", "json")
@@ -33,17 +45,17 @@ try {
     Invoke-Aws @("rds", "create-db-subnet-group", "--profile", $Profile, "--region", $Region, "--db-subnet-group-name", $subnetGroup, "--db-subnet-group-description", "Legacy modernization sandbox Aurora subnets", "--subnet-ids", $SubnetA, $SubnetB)
 }
 
-$sgId = aws ec2 describe-security-groups --profile $Profile --region $Region --filters "Name=vpc-id,Values=$VpcId" "Name=group-name,Values=$securityGroupName" --query "SecurityGroups[0].GroupId" --output text
+$sgId = Get-AwsText @("ec2", "describe-security-groups", "--profile", $Profile, "--region", $Region, "--filters", "Name=vpc-id,Values=$VpcId", "Name=group-name,Values=$securityGroupName", "--query", "SecurityGroups[0].GroupId", "--output", "text")
 if (-not $sgId -or $sgId -eq "None") {
-    $sgId = aws ec2 create-security-group --profile $Profile --region $Region --group-name $securityGroupName --description "Legacy modernization sandbox RDS Data API" --vpc-id $VpcId --query GroupId --output text
+    $sgId = Get-AwsText @("ec2", "create-security-group", "--profile", $Profile, "--region", $Region, "--group-name", $securityGroupName, "--description", "Legacy modernization sandbox RDS Data API", "--vpc-id", $VpcId, "--query", "GroupId", "--output", "text")
 }
 
-$existing = aws rds describe-db-clusters --profile $Profile --region $Region --db-cluster-identifier $cluster --query "DBClusters[0].DBClusterIdentifier" --output text 2>$null
+$existing = Get-AwsText @("rds", "describe-db-clusters", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster, "--query", "DBClusters[0].DBClusterIdentifier", "--output", "text")
 if ($existing -ne $cluster) {
     Invoke-Aws @("rds", "create-db-cluster", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster, "--engine", "aurora-postgresql", "--engine-version", "17.7", "--database-name", $database, "--master-username", "appadmin", "--manage-master-user-password", "--storage-encrypted", "--enable-http-endpoint", "--db-subnet-group-name", $subnetGroup, "--vpc-security-group-ids", $sgId, "--backup-retention-period", "1", "--copy-tags-to-snapshot", "--tags", "Key=Project,Value=legacy-modernization", "Key=Environment,Value=sandbox")
 }
 
-$existingInstance = aws rds describe-db-instances --profile $Profile --region $Region --db-instance-identifier $instance --query "DBInstances[0].DBInstanceIdentifier" --output text 2>$null
+$existingInstance = Get-AwsText @("rds", "describe-db-instances", "--profile", $Profile, "--region", $Region, "--db-instance-identifier", $instance, "--query", "DBInstances[0].DBInstanceIdentifier", "--output", "text")
 if ($existingInstance -ne $instance) {
     Invoke-Aws @("rds", "create-db-instance", "--profile", $Profile, "--region", $Region, "--db-instance-identifier", $instance, "--db-cluster-identifier", $cluster, "--engine", "aurora-postgresql", "--db-instance-class", "db.t4g.medium")
 }
