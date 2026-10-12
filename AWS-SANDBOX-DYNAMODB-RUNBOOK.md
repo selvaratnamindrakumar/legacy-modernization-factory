@@ -635,6 +635,29 @@ Invoke-RestMethod "http://127.0.0.1:8090/api/data?source=rds&tacs=8888" | Conver
 
 Expected result: `source` is `rds`, `count` is `1`, and the record contains `tacs` equal to `8888`. A missing `RDS_RESOURCE_ARN` or `RDS_SECRET_ARN` returns HTTP 502 rather than silently reading demo data.
 
+### 6. Successful RDS validation example
+
+The completed demonstration returned a real database record, not the built-in local demo record:
+
+```json
+{
+  "source": "rds",
+  "tag": "8888",
+  "count": 1,
+  "records": [
+    {
+      "id": "rds-8888",
+      "tacs": "8888",
+      "name": "RDS customer 8888",
+      "status": "ACTIVE",
+      "source": "RDS"
+    }
+  ]
+}
+```
+
+If the response instead contains `id: rds-001` and a `tags` array, the old server is still running in local demo mode. Stop every process listening on port 8090, set `MODERNIZATION_DATA_MODE=aws` and the three RDS variables in the same PowerShell window, then restart the server.
+
 ### RDS cleanup
 
 After the demo, delete the writer first, then the cluster, subnet group, and security group. Confirm the identifiers before running:
