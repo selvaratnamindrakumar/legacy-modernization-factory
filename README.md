@@ -25,6 +25,16 @@ python -m modernization_factory.cli demo --output-dir .\sandbox-output
 python -m unittest discover -s tests -v
 ```
 
+Start a browser/API demo endpoint:
+
+```powershell
+python -m modernization_factory.server --plan .\sandbox-output\plan.json
+```
+
+Open `http://127.0.0.1:8080/` in a browser. The JSON endpoint is
+`http://127.0.0.1:8080/api/plan`, and the health endpoint is
+`http://127.0.0.1:8080/health`.
+
 Use a custom description:
 
 ```powershell

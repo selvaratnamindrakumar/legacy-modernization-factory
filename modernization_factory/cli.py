@@ -15,6 +15,7 @@ DEMO = {
     "runtime": "java-8",
     "deployment": "vm",
     "data_classification": "internal",
+    "tags": {"environment": "sandbox", "owner": "modernization-team", "demo": "true"},
     "interfaces": [
         {"type": "kafka", "direction": "consume", "name": "orders"},
         {"type": "rabbitmq", "direction": "publish", "name": "fulfilment-events"},
