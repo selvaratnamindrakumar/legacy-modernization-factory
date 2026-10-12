@@ -1,0 +1,88 @@
+param(
+    [switch]$Execute,
+    [string]$Profile = "sandbox",
+    [string]$Region = "us-east-1",
+    [string]$VpcId = "vpc-060d6b7b",
+    [string]$SubnetA = "subnet-3b9ad05d",
+    [string]$SubnetB = "subnet-910454b0"
+)
+
+$ErrorActionPreference = "Stop"
+$cluster = "legacy-modernization-aurora"
+$instance = "legacy-modernization-aurora-1"
+$subnetGroup = "legacy-modernization-db-subnets"
+$securityGroupName = "legacy-modernization-rds-sg"
+$database = "legacydb"
+
+if (-not $Execute) {
+    Write-Host "DRY RUN: no AWS resources will be created or modified." -ForegroundColor Yellow
+    Write-Host "Review this script, then rerun with -Execute to create the sandbox Aurora demo."
+    exit 0
+}
+
+function Invoke-Aws([string[]]$Arguments) {
+    & aws @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "AWS CLI command failed with exit code $LASTEXITCODE" }
+}
+
+Write-Host "Creating or reusing subnet group..."
+try {
+    Invoke-Aws @("rds", "describe-db-subnet-groups", "--profile", $Profile, "--region", $Region, "--db-subnet-group-name", $subnetGroup, "--output", "json")
+} catch {
+    Invoke-Aws @("rds", "create-db-subnet-group", "--profile", $Profile, "--region", $Region, "--db-subnet-group-name", $subnetGroup, "--db-subnet-group-description", "Legacy modernization sandbox Aurora subnets", "--subnet-ids", $SubnetA, $SubnetB)
+}
+
+$sgId = aws ec2 describe-security-groups --profile $Profile --region $Region --filters "Name=vpc-id,Values=$VpcId" "Name=group-name,Values=$securityGroupName" --query "SecurityGroups[0].GroupId" --output text
+if (-not $sgId -or $sgId -eq "None") {
+    $sgId = aws ec2 create-security-group --profile $Profile --region $Region --group-name $securityGroupName --description "Legacy modernization sandbox RDS Data API" --vpc-id $VpcId --query GroupId --output text
+}
+
+$existing = aws rds describe-db-clusters --profile $Profile --region $Region --db-cluster-identifier $cluster --query "DBClusters[0].DBClusterIdentifier" --output text 2>$null
+if ($existing -ne $cluster) {
+    Invoke-Aws @("rds", "create-db-cluster", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster, "--engine", "aurora-postgresql", "--engine-version", "17.7", "--database-name", $database, "--master-username", "appadmin", "--manage-master-user-password", "--storage-encrypted", "--enable-http-endpoint", "--db-subnet-group-name", $subnetGroup, "--vpc-security-group-ids", $sgId, "--backup-retention-period", "1", "--copy-tags-to-snapshot", "--tags", "Key=Project,Value=legacy-modernization", "Key=Environment,Value=sandbox")
+}
+
+$existingInstance = aws rds describe-db-instances --profile $Profile --region $Region --db-instance-identifier $instance --query "DBInstances[0].DBInstanceIdentifier" --output text 2>$null
+if ($existingInstance -ne $instance) {
+    Invoke-Aws @("rds", "create-db-instance", "--profile", $Profile, "--region", $Region, "--db-instance-identifier", $instance, "--db-cluster-identifier", $cluster, "--engine", "aurora-postgresql", "--db-instance-class", "db.t4g.medium")
+}
+
+Invoke-Aws @("rds", "wait", "db-instance-available", "--profile", $Profile, "--region", $Region, "--db-instance-identifier", $instance)
+
+$resourceArn = aws rds describe-db-clusters --profile $Profile --region $Region --db-cluster-identifier $cluster --query "DBClusters[0].DBClusterArn" --output text
+$secretArn = aws rds describe-db-clusters --profile $Profile --region $Region --db-cluster-identifier $cluster --query "DBClusters[0].MasterUserSecret.SecretArn" --output text
+if (-not $resourceArn -or $resourceArn -eq "None" -or -not $secretArn -or $secretArn -eq "None") { throw "Cluster ARN or managed secret ARN is missing." }
+
+function Execute-Sql([string]$Sql, [array]$Parameters = @()) {
+    $request = @{ resourceArn = $resourceArn; secretArn = $secretArn; database = $database; sql = $Sql }
+    if ($Parameters.Count -gt 0) { $request.parameters = $Parameters }
+    $path = Join-Path $PSScriptRoot ("rds-request-" + [Guid]::NewGuid().ToString() + ".json")
+    try {
+        $request | ConvertTo-Json -Depth 10 | Set-Content -Encoding ascii $path
+        Invoke-Aws @("rds-data", "execute-statement", "--profile", $Profile, "--region", $Region, "--cli-input-json", "file://$path")
+    } finally {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Execute-Sql "CREATE TABLE IF NOT EXISTS legacy_records (id VARCHAR(100) PRIMARY KEY, tacs VARCHAR(50) NOT NULL, name VARCHAR(200) NOT NULL, status VARCHAR(50) NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+Execute-Sql "CREATE INDEX IF NOT EXISTS idx_legacy_records_tacs ON legacy_records (tacs)"
+$rows = @(
+    @{ id = "rds-8888"; tacs = "8888"; name = "RDS customer 8888"; status = "ACTIVE" },
+    @{ id = "rds-7777"; tacs = "7777"; name = "RDS customer 7777"; status = "READY" }
+)
+foreach ($row in $rows) {
+    $parameters = @(
+        @{ name = "id"; value = @{ stringValue = $row.id } },
+        @{ name = "tacs"; value = @{ stringValue = $row.tacs } },
+        @{ name = "name"; value = @{ stringValue = $row.name } },
+        @{ name = "status"; value = @{ stringValue = $row.status } },
+        @{ name = "payload"; value = @{ stringValue = '{"origin":"accumulo","mapping":"rds"}' } }
+    )
+    Execute-Sql "INSERT INTO legacy_records (id,tacs,name,status,payload) VALUES (:id,:tacs,:name,:status,CAST(:payload AS JSONB)) ON CONFLICT (id) DO UPDATE SET tacs=EXCLUDED.tacs,name=EXCLUDED.name,status=EXCLUDED.status,payload=EXCLUDED.payload" $parameters
+}
+
+Write-Host "RDS demo is ready." -ForegroundColor Green
+Write-Host "RDS_RESOURCE_ARN=$resourceArn"
+Write-Host "RDS_SECRET_ARN=$secretArn"
+Write-Host "Set these values in the endpoint PowerShell window before starting the server."

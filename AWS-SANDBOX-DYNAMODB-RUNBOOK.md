@@ -454,6 +454,20 @@ The existing `database-1` cluster is available but has no DB instance, subnet gr
 
 ### 1. Create a subnet group and security group
 
+Alternatively, from the repository directory, preview the complete automated flow first:
+
+```powershell
+.\scripts\Invoke-RdsDemo.ps1
+```
+
+After reviewing it, run the provisioning, table creation, and record insertion explicitly:
+
+```powershell
+.\scripts\Invoke-RdsDemo.ps1 -Execute
+```
+
+The script creates or reuses the dedicated demo resources, inserts both `8888` and `7777`, and prints the two ARN values needed by the local endpoint.
+
 ```powershell
 $profile = "sandbox"
 $region = "us-east-1"
