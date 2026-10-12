@@ -22,8 +22,15 @@ if (-not $Execute) {
 $jsonPath = Join-Path $PSScriptRoot "s3-legacy-records.json"
 try {
     $records | ConvertTo-Json -Depth 10 | Set-Content -Encoding ascii $jsonPath
-    aws s3api head-bucket --profile $Profile --bucket $Bucket 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        aws s3api head-bucket --profile $Profile --region $Region --bucket $Bucket 2>$null
+        $headExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($headExitCode -ne 0) {
         if ($Region -eq "us-east-1") {
             aws s3api create-bucket --profile $Profile --region $Region --bucket $Bucket
         } else {
