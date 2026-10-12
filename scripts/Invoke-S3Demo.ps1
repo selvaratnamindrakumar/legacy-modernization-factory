@@ -20,8 +20,10 @@ if (-not $Execute) {
 }
 
 $jsonPath = Join-Path $PSScriptRoot "s3-legacy-records.json"
+$encryptionPath = Join-Path $PSScriptRoot "s3-encryption.json"
 try {
     $records | ConvertTo-Json -Depth 10 | Set-Content -Encoding ascii $jsonPath
+    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' | Set-Content -Encoding ascii $encryptionPath
     $previousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = "Continue"
@@ -39,12 +41,14 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Unable to create S3 bucket $Bucket" }
     }
     aws s3api put-public-access-block --profile $Profile --region $Region --bucket $Bucket --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
-    aws s3api put-bucket-encryption --profile $Profile --region $Region --bucket $Bucket --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
-    aws s3api put-object --profile $Profile --region $Region --bucket $Bucket --key $Key --body $jsonPath --content-type application/json
+    aws s3api put-bucket-encryption --profile $Profile --region $Region --bucket $Bucket --server-side-encryption-configuration file://$encryptionPath
+    if ($LASTEXITCODE -ne 0) { throw "Unable to enable default S3 encryption" }
+    aws s3api put-object --profile $Profile --region $Region --bucket $Bucket --key $Key --body $jsonPath --content-type application/json --server-side-encryption AES256
     if ($LASTEXITCODE -ne 0) { throw "Unable to upload S3 object" }
     Write-Host "S3 demo is ready." -ForegroundColor Green
     Write-Host "S3_BUCKET=$Bucket"
     Write-Host "S3_KEY=$Key"
 } finally {
     Remove-Item -LiteralPath $jsonPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $encryptionPath -Force -ErrorAction SilentlyContinue
 }
