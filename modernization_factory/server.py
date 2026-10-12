@@ -70,6 +70,31 @@ def load_dynamodb_data(tag: str | None) -> list[dict[str, Any]]:
     return [dict(item, source="DYNAMODB") for item in response.get("Items", [])]
 
 
+def load_s3_data(tag: str | None) -> list[dict[str, Any]]:
+    """Read mapped records from a private S3 JSON object in AWS mode."""
+    try:
+        import boto3
+    except ImportError as exc:
+        raise RuntimeError("Install boto3 before using AWS mode: python -m pip install boto3") from exc
+
+    bucket = os.getenv("S3_BUCKET")
+    key = os.getenv("S3_KEY", "legacy-records.json")
+    if not bucket:
+        raise RuntimeError("Set S3_BUCKET before using the S3 provider")
+    session = boto3.Session(profile_name=os.getenv("AWS_PROFILE") or None, region_name=os.getenv("AWS_REGION", "us-east-1"))
+    client = session.client("s3")
+    payload = json.loads(client.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8"))
+    items = payload.get("records", []) if isinstance(payload, dict) else payload
+    records = []
+    for item in items:
+        record = dict(item)
+        record["source"] = "S3"
+        if tag and tag not in (record.get("tacs"), *(record.get("tags") or [])):
+            continue
+        records.append(record)
+    return records
+
+
 def load_rds_data(tag: str | None) -> list[dict[str, Any]]:
     """Query Aurora PostgreSQL through the RDS Data API in AWS mode."""
     try:
@@ -159,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if os.getenv("MODERNIZATION_DATA_MODE") == "aws" and source == "dynamodb":
                     records = load_dynamodb_data(tag)
+                elif os.getenv("MODERNIZATION_DATA_MODE") == "aws" and source == "s3":
+                    records = load_s3_data(tag)
                 elif os.getenv("MODERNIZATION_DATA_MODE") == "aws" and source == "rds":
                     records = load_rds_data(tag)
                 else:

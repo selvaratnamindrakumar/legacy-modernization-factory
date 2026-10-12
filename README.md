@@ -59,6 +59,24 @@ python -m modernization_factory.server --plan .\sandbox-output\plan.json --port 
 
 Then query `http://127.0.0.1:8090/api/data?source=dynamodb&tacs=8888`.
 
+To create a private S3 JSON-backed record source, preview and then execute:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Invoke-S3Demo.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\Invoke-S3Demo.ps1 -Execute
+```
+
+Set the returned values before starting the endpoint:
+
+```powershell
+$env:S3_BUCKET = "legacy-modernization-s3-356724906763"
+$env:S3_KEY = "legacy-records.json"
+$env:MODERNIZATION_DATA_MODE = "aws"
+python -m modernization_factory.server --plan .\sandbox-output\plan.json --port 8090
+```
+
+Test with `http://127.0.0.1:8090/api/data?source=s3&tacs=8888`. S3 is represented as a private JSON object rather than a relational table; the endpoint filters the object records by TACS.
+
 Use a custom description:
 
 ```powershell
