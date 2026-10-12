@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:AWS_PAGER = ""
 $cluster = "legacy-modernization-aurora"
 $instance = "legacy-modernization-aurora-1"
 $subnetGroup = "legacy-modernization-db-subnets"
