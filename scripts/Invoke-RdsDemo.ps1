@@ -52,12 +52,22 @@ if (-not $sgId -or $sgId -eq "None") {
 
 $existing = Get-AwsText @("rds", "describe-db-clusters", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster, "--query", "DBClusters[0].DBClusterIdentifier", "--output", "text")
 if ($existing -ne $cluster) {
-    Invoke-Aws @("rds", "create-db-cluster", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster, "--engine", "aurora-postgresql", "--engine-version", "17.7", "--database-name", $database, "--master-username", "appadmin", "--manage-master-user-password", "--storage-encrypted", "--enable-http-endpoint", "--db-subnet-group-name", $subnetGroup, "--vpc-security-group-ids", $sgId, "--backup-retention-period", "1", "--copy-tags-to-snapshot", "--tags", "Key=Project,Value=legacy-modernization", "Key=Environment,Value=sandbox")
+    Invoke-Aws @("rds", "create-db-cluster", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster, "--engine", "aurora-postgresql", "--engine-version", "17.7", "--database-name", $database, "--master-username", "appadmin", "--manage-master-user-password", "--storage-encrypted", "--enable-http-endpoint", "--serverless-v2-scaling-configuration", "MinCapacity=0.5,MaxCapacity=1", "--db-subnet-group-name", $subnetGroup, "--vpc-security-group-ids", $sgId, "--backup-retention-period", "1", "--copy-tags-to-snapshot", "--tags", "Key=Project,Value=legacy-modernization", "Key=Environment,Value=sandbox")
+}
+
+$clusterStatus = Get-AwsText @("rds", "describe-db-clusters", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster, "--query", "DBClusters[0].Status", "--output", "text")
+if ($clusterStatus -ne "available") {
+    Invoke-Aws @("rds", "wait", "db-cluster-available", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster)
+}
+
+$scaling = Get-AwsText @("rds", "describe-db-clusters", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster, "--query", "DBClusters[0].ServerlessV2ScalingConfiguration", "--output", "json")
+if (-not $scaling -or $scaling -eq "null") {
+    Invoke-Aws @("rds", "modify-db-cluster", "--profile", $Profile, "--region", $Region, "--db-cluster-identifier", $cluster, "--serverless-v2-scaling-configuration", "MinCapacity=0.5,MaxCapacity=1", "--apply-immediately")
 }
 
 $existingInstance = Get-AwsText @("rds", "describe-db-instances", "--profile", $Profile, "--region", $Region, "--db-instance-identifier", $instance, "--query", "DBInstances[0].DBInstanceIdentifier", "--output", "text")
 if ($existingInstance -ne $instance) {
-    Invoke-Aws @("rds", "create-db-instance", "--profile", $Profile, "--region", $Region, "--db-instance-identifier", $instance, "--db-cluster-identifier", $cluster, "--engine", "aurora-postgresql", "--db-instance-class", "db.t4g.medium")
+    Invoke-Aws @("rds", "create-db-instance", "--profile", $Profile, "--region", $Region, "--db-instance-identifier", $instance, "--db-cluster-identifier", $cluster, "--engine", "aurora-postgresql", "--db-instance-class", "db.serverless")
 }
 
 Invoke-Aws @("rds", "wait", "db-instance-available", "--profile", $Profile, "--region", $Region, "--db-instance-identifier", $instance)
