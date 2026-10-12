@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,10 @@ DEMO_DATA = {
         {"id": "rds-001", "name": "customer-8888", "tags": ["8888", "customer"], "status": "active"},
         {"id": "rds-002", "name": "customer-9999", "tags": ["9999", "customer"], "status": "inactive"},
     ],
+    "dynamodb": [
+        {"id": "ddb-001", "name": "DynamoDB record 8888", "tags": ["8888", "demo"], "status": "ACTIVE"},
+        {"id": "ddb-002", "name": "DynamoDB record 7777", "tags": ["7777", "demo"], "status": "READY"},
+    ],
 }
 
 
@@ -43,9 +48,26 @@ def load_plan(path: Path | None) -> dict[str, Any]:
 
 
 def load_data(source: str | None, tag: str | None) -> list[dict[str, Any]]:
-    sources = [source] if source in DEMO_DATA else list(DEMO_DATA)
+    sources = [source] if source in DEMO_DATA else list(DEMO_DATA) if source in (None, "all") else []
     records = [dict(record, source=item_source.upper()) for item_source in sources for record in DEMO_DATA[item_source]]
     return [record for record in records if not tag or tag in record.get("tags", [])]
+
+
+def load_dynamodb_data(tag: str | None) -> list[dict[str, Any]]:
+    """Read the real sandbox table when MODERNIZATION_DATA_MODE=aws."""
+    try:
+        import boto3
+        from boto3.dynamodb.conditions import Key
+    except ImportError as exc:
+        raise RuntimeError("Install boto3 before using AWS mode: python -m pip install boto3") from exc
+
+    session = boto3.Session(profile_name=os.getenv("AWS_PROFILE") or None, region_name=os.getenv("AWS_REGION", "us-east-1"))
+    table = session.resource("dynamodb").Table(os.getenv("DYNAMODB_TABLE", "legacy-modernization-demo"))
+    if tag:
+        response = table.query(IndexName=os.getenv("DYNAMODB_INDEX", "tacs-index"), KeyConditionExpression=Key("tacs").eq(tag))
+    else:
+        response = table.scan()
+    return [dict(item, source="DYNAMODB") for item in response.get("Items", [])]
 
 
 def page(plan: dict[str, Any]) -> str:
@@ -89,7 +111,11 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/data":
             tag = (query.get("tags") or query.get("tacs") or [None])[0]
             source = (query.get("source") or [None])[0]
-            records = load_data(source, tag)
+            try:
+                records = load_dynamodb_data(tag) if source == "dynamodb" and os.getenv("MODERNIZATION_DATA_MODE") == "aws" else load_data(source, tag)
+            except RuntimeError as exc:
+                self.send_error(502, str(exc))
+                return
             payload = {"source": source or "s3+rds", "tag": tag, "count": len(records), "records": records}
             self.send_body(json.dumps(payload, indent=2), "application/json")
         elif parsed.path == "/":
