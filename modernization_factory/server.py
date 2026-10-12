@@ -5,6 +5,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from .pipeline import propose, validate
 
@@ -23,11 +24,28 @@ DEMO_APPLICATION: dict[str, Any] = {
     ],
 }
 
+DEMO_DATA = {
+    "s3": [
+        {"id": "s3-001", "name": "order-file-001", "tags": ["8888", "orders"], "status": "ready"},
+        {"id": "s3-002", "name": "order-file-002", "tags": ["7777", "orders"], "status": "processed"},
+    ],
+    "rds": [
+        {"id": "rds-001", "name": "customer-8888", "tags": ["8888", "customer"], "status": "active"},
+        {"id": "rds-002", "name": "customer-9999", "tags": ["9999", "customer"], "status": "inactive"},
+    ],
+}
+
 
 def load_plan(path: Path | None) -> dict[str, Any]:
     if path and path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     return validate(propose(DEMO_APPLICATION)).to_dict()
+
+
+def load_data(source: str | None, tag: str | None) -> list[dict[str, Any]]:
+    sources = [source] if source in DEMO_DATA else list(DEMO_DATA)
+    records = [dict(record, source=item_source.upper()) for item_source in sources for record in DEMO_DATA[item_source]]
+    return [record for record in records if not tag or tag in record.get("tags", [])]
 
 
 def page(plan: dict[str, Any]) -> str:
@@ -45,7 +63,7 @@ def page(plan: dict[str, Any]) -> str:
 <p>Tags: {tags}</p><h2>Proposed AWS mappings</h2>
 <table><tr><th>Legacy interface</th><th>AWS target</th><th>Confidence</th></tr>{rows}</table>
 <h2>Findings</h2><pre>{json.dumps(plan.get('findings', []), indent=2)}</pre>
-<p>JSON endpoint: <a href='/api/plan'>/api/plan</a> · Health: <a href='/health'>/health</a></p>
+<p>JSON endpoint: <a href='/api/plan'>/api/plan</a> · Data demo: <a href='/api/data?tags=8888'>/api/data?tags=8888</a> · Health: <a href='/health'>/health</a></p>
 </body></html>"""
 
 
@@ -62,11 +80,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
-        if self.path == "/health":
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+        if parsed.path == "/health":
             self.send_body(json.dumps({"status": "ok", "service": "modernization-factory"}), "application/json")
-        elif self.path == "/api/plan":
+        elif parsed.path == "/api/plan":
             self.send_body(json.dumps(self.plan, indent=2), "application/json")
-        elif self.path == "/":
+        elif parsed.path == "/api/data":
+            tag = (query.get("tags") or query.get("tacs") or [None])[0]
+            source = (query.get("source") or [None])[0]
+            records = load_data(source, tag)
+            payload = {"source": source or "s3+rds", "tag": tag, "count": len(records), "records": records}
+            self.send_body(json.dumps(payload, indent=2), "application/json")
+        elif parsed.path == "/":
             self.send_body(page(self.plan), "text/html; charset=utf-8")
         else:
             self.send_error(404, "Not found")

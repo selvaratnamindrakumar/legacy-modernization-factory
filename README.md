@@ -35,6 +35,16 @@ Open `http://127.0.0.1:8080/` in a browser. The JSON endpoint is
 `http://127.0.0.1:8080/api/plan`, and the health endpoint is
 `http://127.0.0.1:8080/health`.
 
+Demo tagged data from the local S3/RDS simulator:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8080/api/data?tags=8888"
+Invoke-RestMethod "http://127.0.0.1:8080/api/data?source=s3&tags=8888"
+Invoke-RestMethod "http://127.0.0.1:8080/api/data?source=rds&tags=8888"
+```
+
+The endpoint also accepts `tacs=8888` as an alias for the requested demo spelling. The current data is local test data, not a live AWS connection.
+
 Use a custom description:
 
 ```powershell
