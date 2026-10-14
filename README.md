@@ -69,6 +69,12 @@ python .\scripts\populate_test_data.py --target s3 --count 100000
 python .\scripts\populate_test_data.py --target rds --count 100000 --tacs 8888
 ```
 
+RDS load data is normalized into `handset_details` and `cells`; the endpoint returns the joined view. The RDS setup script creates and seeds both tables:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Invoke-RdsDemo.ps1 -Execute
+```
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the presentation architecture,
 production-readiness target, security baseline, and decisions required.
 

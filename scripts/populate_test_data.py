@@ -24,6 +24,8 @@ DEFAULT_REGION = "us-east-1"
 DEFAULT_DDB_TABLE = "legacy-modernization-demo"
 DEFAULT_S3_KEY = "legacy-records.json"
 DEFAULT_RDS_TABLE = "legacy_records"
+DEFAULT_RDS_HANDSET_TABLE = "handset_details"
+DEFAULT_RDS_CELL_TABLE = "cells"
 BATCH_SIZE = 100
 
 
@@ -98,39 +100,50 @@ def populate_rds(items: Iterator[dict[str, Any]], count: int) -> None:
     resource_arn = config("RDS_RESOURCE_ARN")
     secret_arn = config("RDS_SECRET_ARN")
     database = config("RDS_DATABASE", "legacydb")
-    table = config("RDS_TABLE", DEFAULT_RDS_TABLE)
+    handset_table = config("RDS_HANDSET_TABLE", DEFAULT_RDS_HANDSET_TABLE)
+    cell_table = config("RDS_CELL_TABLE", DEFAULT_RDS_CELL_TABLE)
     if not resource_arn or not secret_arn:
         raise RuntimeError("Set RDS_RESOURCE_ARN and RDS_SECRET_ARN")
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table or ""):
-        raise RuntimeError("RDS_TABLE must be a simple SQL identifier")
+    if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table or "") for table in (handset_table, cell_table)):
+        raise RuntimeError("RDS_HANDSET_TABLE and RDS_CELL_TABLE must be simple SQL identifiers")
     client = aws_session().client("rds-data")
-    execute_rds(client, resource_arn, secret_arn, database, f"CREATE TABLE IF NOT EXISTS {table} (id VARCHAR(100) PRIMARY KEY, tacs VARCHAR(50) NOT NULL, handset VARCHAR(50), cell VARCHAR(50), name VARCHAR(200) NOT NULL, status VARCHAR(50) NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)")
-    execute_rds(client, resource_arn, secret_arn, database, f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS handset VARCHAR(50)")
-    execute_rds(client, resource_arn, secret_arn, database, f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS cell VARCHAR(50)")
-    execute_rds(client, resource_arn, secret_arn, database, f"CREATE INDEX IF NOT EXISTS idx_{table}_tacs ON {table} (tacs)")
-    sql = f"INSERT INTO {table} (id,tacs,handset,cell,name,status,payload) VALUES (:id,:tacs,:handset,:cell,:name,:status,CAST(:payload AS JSONB)) ON CONFLICT (id) DO UPDATE SET tacs=EXCLUDED.tacs,handset=EXCLUDED.handset,cell=EXCLUDED.cell,name=EXCLUDED.name,status=EXCLUDED.status,payload=EXCLUDED.payload"
-    batch = []
+    execute_rds(client, resource_arn, secret_arn, database, f"CREATE TABLE IF NOT EXISTS {cell_table} (cell_id VARCHAR(100) PRIMARY KEY, cell_name VARCHAR(200) NOT NULL, technology VARCHAR(50), status VARCHAR(50) NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+    execute_rds(client, resource_arn, secret_arn, database, f"CREATE TABLE IF NOT EXISTS {handset_table} (handset_id VARCHAR(100) PRIMARY KEY, tacs VARCHAR(50) NOT NULL, cell_id VARCHAR(100) REFERENCES {cell_table}(cell_id), handset_model VARCHAR(100), status VARCHAR(50) NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+    execute_rds(client, resource_arn, secret_arn, database, f"CREATE INDEX IF NOT EXISTS idx_{handset_table}_tacs ON {handset_table} (tacs)")
+    cell_sql = f"INSERT INTO {cell_table} (cell_id,cell_name,technology,status,payload) VALUES (:cell_id,:cell_name,:technology,:status,CAST(:payload AS JSONB)) ON CONFLICT (cell_id) DO UPDATE SET cell_name=EXCLUDED.cell_name,technology=EXCLUDED.technology,status=EXCLUDED.status,payload=EXCLUDED.payload"
+    handset_sql = f"INSERT INTO {handset_table} (handset_id,tacs,cell_id,handset_model,status,payload) VALUES (:handset_id,:tacs,:cell_id,:handset_model,:status,CAST(:payload AS JSONB)) ON CONFLICT (handset_id) DO UPDATE SET tacs=EXCLUDED.tacs,cell_id=EXCLUDED.cell_id,handset_model=EXCLUDED.handset_model,status=EXCLUDED.status,payload=EXCLUDED.payload"
+    cell_batch = []
+    handset_batch = []
     written = 0
     for item in items:
-        batch.append([
-            {"name": "id", "value": {"stringValue": item["id"]}},
-            {"name": "tacs", "value": {"stringValue": item["tacs"]}},
-            {"name": "handset", "value": {"stringValue": item["handset"]}},
-            {"name": "cell", "value": {"stringValue": item["cell"]}},
-            {"name": "name", "value": {"stringValue": item["name"]}},
+        cell_id = item["cell"]
+        cell_batch.append([
+            {"name": "cell_id", "value": {"stringValue": cell_id}},
+            {"name": "cell_name", "value": {"stringValue": f"Cell site {cell_id}"}},
+            {"name": "technology", "value": {"stringValue": "5G"}},
             {"name": "status", "value": {"stringValue": item["status"]}},
             {"name": "payload", "value": {"stringValue": json.dumps(item["payload"], separators=(",", ":"))}},
         ])
-        if len(batch) == BATCH_SIZE:
-            execute_rds(client, resource_arn, secret_arn, database, sql, batch)
-            written += len(batch)
-            batch = []
+        handset_batch.append([
+            {"name": "handset_id", "value": {"stringValue": item["id"]}},
+            {"name": "tacs", "value": {"stringValue": item["tacs"]}},
+            {"name": "cell_id", "value": {"stringValue": cell_id}},
+            {"name": "handset_model", "value": {"stringValue": item["handset"]}},
+            {"name": "status", "value": {"stringValue": item["status"]}},
+            {"name": "payload", "value": {"stringValue": json.dumps(item["payload"], separators=(",", ":"))}},
+        ])
+        if len(handset_batch) == BATCH_SIZE:
+            execute_rds(client, resource_arn, secret_arn, database, cell_sql, cell_batch)
+            execute_rds(client, resource_arn, secret_arn, database, handset_sql, handset_batch)
+            written += len(handset_batch)
+            cell_batch, handset_batch = [], []
             if written % 10000 == 0:
                 print(f"RDS: {written}/{count}")
-    if batch:
-        execute_rds(client, resource_arn, secret_arn, database, sql, batch)
-        written += len(batch)
-    print(f"RDS complete: {written} records in {table}")
+    if handset_batch:
+        execute_rds(client, resource_arn, secret_arn, database, cell_sql, cell_batch)
+        execute_rds(client, resource_arn, secret_arn, database, handset_sql, handset_batch)
+        written += len(handset_batch)
+    print(f"RDS complete: {written} handset records in {handset_table} and cell records in {cell_table}")
 
 
 def main() -> None:

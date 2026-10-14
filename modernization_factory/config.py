@@ -13,6 +13,8 @@ DEFAULT_DYNAMODB_INDEX = "tacs-index"
 DEFAULT_S3_KEY = "legacy-records.json"
 DEFAULT_RDS_DATABASE = "legacydb"
 DEFAULT_RDS_TABLE = "legacy_records"
+DEFAULT_RDS_HANDSET_TABLE = "handset_details"
+DEFAULT_RDS_CELL_TABLE = "cells"
 DEFAULT_QUERY_LIMIT = 100
 
 
@@ -29,6 +31,8 @@ class AppConfig:
     rds_secret_arn: str | None
     rds_database: str
     rds_table: str
+    rds_handset_table: str
+    rds_cell_table: str
     query_limit: int
 
     @classmethod
@@ -45,5 +49,7 @@ class AppConfig:
             rds_secret_arn=os.getenv("RDS_SECRET_ARN") or None,
             rds_database=os.getenv("RDS_DATABASE", DEFAULT_RDS_DATABASE),
             rds_table=os.getenv("RDS_TABLE", DEFAULT_RDS_TABLE),
+            rds_handset_table=os.getenv("RDS_HANDSET_TABLE", DEFAULT_RDS_HANDSET_TABLE),
+            rds_cell_table=os.getenv("RDS_CELL_TABLE", DEFAULT_RDS_CELL_TABLE),
             query_limit=max(1, int(os.getenv("QUERY_LIMIT", str(DEFAULT_QUERY_LIMIT)))),
         )

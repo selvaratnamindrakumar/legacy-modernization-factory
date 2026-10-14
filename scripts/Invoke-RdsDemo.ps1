@@ -14,6 +14,8 @@ $instance = "legacy-modernization-aurora-1"
 $subnetGroup = "legacy-modernization-db-subnets"
 $securityGroupName = "legacy-modernization-rds-sg"
 $database = "legacydb"
+$handsetTable = "handset_details"
+$cellTable = "cells"
 
 if (-not $Execute) {
     Write-Host "DRY RUN: no AWS resources will be created or modified." -ForegroundColor Yellow
@@ -88,25 +90,31 @@ function Execute-Sql([string]$Sql, [array]$Parameters = @()) {
     }
 }
 
-Execute-Sql "CREATE TABLE IF NOT EXISTS legacy_records (id VARCHAR(100) PRIMARY KEY, tacs VARCHAR(50) NOT NULL, handset VARCHAR(50), cell VARCHAR(50), name VARCHAR(200) NOT NULL, status VARCHAR(50) NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)"
-Execute-Sql "ALTER TABLE legacy_records ADD COLUMN IF NOT EXISTS handset VARCHAR(50)"
-Execute-Sql "ALTER TABLE legacy_records ADD COLUMN IF NOT EXISTS cell VARCHAR(50)"
-Execute-Sql "CREATE INDEX IF NOT EXISTS idx_legacy_records_tacs ON legacy_records (tacs)"
+Execute-Sql "CREATE TABLE IF NOT EXISTS cells (cell_id VARCHAR(100) PRIMARY KEY, cell_name VARCHAR(200) NOT NULL, technology VARCHAR(50), status VARCHAR(50) NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+Execute-Sql "CREATE TABLE IF NOT EXISTS handset_details (handset_id VARCHAR(100) PRIMARY KEY, tacs VARCHAR(50) NOT NULL, cell_id VARCHAR(100) REFERENCES cells(cell_id), handset_model VARCHAR(100), status VARCHAR(50) NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+Execute-Sql "CREATE INDEX IF NOT EXISTS idx_handset_details_tacs ON handset_details (tacs)"
 $rows = @(
     @{ id = "rds-8888"; tacs = "8888"; handset = "HS-8888"; cell = "CELL-8888"; name = "RDS customer 8888"; status = "ACTIVE" },
     @{ id = "rds-7777"; tacs = "7777"; handset = "HS-7777"; cell = "CELL-7777"; name = "RDS customer 7777"; status = "READY" }
 )
 foreach ($row in $rows) {
-    $parameters = @(
-        @{ name = "id"; value = @{ stringValue = $row.id } },
-        @{ name = "tacs"; value = @{ stringValue = $row.tacs } },
-        @{ name = "handset"; value = @{ stringValue = $row.handset } },
-        @{ name = "cell"; value = @{ stringValue = $row.cell } },
-        @{ name = "name"; value = @{ stringValue = $row.name } },
+    $cellParameters = @(
+        @{ name = "cell_id"; value = @{ stringValue = $row.cell } },
+        @{ name = "cell_name"; value = @{ stringValue = "Cell site $($row.cell)" } },
+        @{ name = "technology"; value = @{ stringValue = "5G" } },
         @{ name = "status"; value = @{ stringValue = $row.status } },
-        @{ name = "payload"; value = @{ stringValue = '{"origin":"accumulo","mapping":"rds"}' } }
+        @{ name = "payload"; value = @{ stringValue = '{"origin":"accumulo","mapping":"cell"}' } }
     )
-    Execute-Sql "INSERT INTO legacy_records (id,tacs,handset,cell,name,status,payload) VALUES (:id,:tacs,:handset,:cell,:name,:status,CAST(:payload AS JSONB)) ON CONFLICT (id) DO UPDATE SET tacs=EXCLUDED.tacs,handset=EXCLUDED.handset,cell=EXCLUDED.cell,name=EXCLUDED.name,status=EXCLUDED.status,payload=EXCLUDED.payload" $parameters
+    Execute-Sql "INSERT INTO cells (cell_id,cell_name,technology,status,payload) VALUES (:cell_id,:cell_name,:technology,:status,CAST(:payload AS JSONB)) ON CONFLICT (cell_id) DO UPDATE SET cell_name=EXCLUDED.cell_name,technology=EXCLUDED.technology,status=EXCLUDED.status,payload=EXCLUDED.payload" $cellParameters
+    $handsetParameters = @(
+        @{ name = "handset_id"; value = @{ stringValue = $row.handset } },
+        @{ name = "tacs"; value = @{ stringValue = $row.tacs } },
+        @{ name = "cell_id"; value = @{ stringValue = $row.cell } },
+        @{ name = "handset_model"; value = @{ stringValue = $row.name } },
+        @{ name = "status"; value = @{ stringValue = $row.status } },
+        @{ name = "payload"; value = @{ stringValue = '{"origin":"accumulo","mapping":"handset"}' } }
+    )
+    Execute-Sql "INSERT INTO handset_details (handset_id,tacs,cell_id,handset_model,status,payload) VALUES (:handset_id,:tacs,:cell_id,:handset_model,:status,CAST(:payload AS JSONB)) ON CONFLICT (handset_id) DO UPDATE SET tacs=EXCLUDED.tacs,cell_id=EXCLUDED.cell_id,handset_model=EXCLUDED.handset_model,status=EXCLUDED.status,payload=EXCLUDED.payload" $handsetParameters
 }
 
 Write-Host "RDS demo is ready." -ForegroundColor Green

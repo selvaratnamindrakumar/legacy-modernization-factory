@@ -44,6 +44,15 @@ Configuration is centralized in `modernization_factory/config.py` and overridden
 | `payload` | JSON extension point for future columns |
 | `tags` | S3/DynamoDB metadata for filtering and test data |
 
+For the normalized RDS target, the demonstrator now creates two tables:
+
+```text
+handset_details(handset_id PK, tacs, cell_id FK, handset_model, status, payload)
+cells(cell_id PK, cell_name, technology, status, payload)
+```
+
+The endpoint joins `handset_details` to `cells` by `cell_id`. If handset movement history is required, add a future `handset_cell_history` association table rather than overwriting the current relationship.
+
 Future fields should be added to the canonical mapping contract first, then mapped per target. RDS migrations should use additive, backward-compatible schema changes. S3 and DynamoDB can carry additional fields without changing the transport contract.
 
 ## Synthetic load testing

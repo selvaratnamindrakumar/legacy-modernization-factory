@@ -115,15 +115,16 @@ def load_rds_data(tag: str | None) -> list[dict[str, Any]]:
     if not resource_arn or not secret_arn:
         raise RuntimeError("Set RDS_RESOURCE_ARN and RDS_SECRET_ARN before using the RDS provider")
 
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", config.rds_table):
-        raise RuntimeError("RDS_TABLE must be a simple SQL identifier")
-    table = config.rds_table
-    sql = f"SELECT id, tacs, handset, cell, name, status FROM {table}"
+    table_names = (config.rds_handset_table, config.rds_cell_table)
+    if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in table_names):
+        raise RuntimeError("RDS_HANDSET_TABLE and RDS_CELL_TABLE must be simple SQL identifiers")
+    handset_table, cell_table = table_names
+    sql = f"SELECT h.handset_id, h.tacs, h.handset_model, h.status, c.cell_id, c.cell_name, c.technology FROM {handset_table} h LEFT JOIN {cell_table} c ON h.cell_id = c.cell_id"
     parameters = []
     if tag:
         sql += " WHERE tacs = :tacs"
         parameters = [{"name": "tacs", "value": {"stringValue": tag}}]
-    sql += f" ORDER BY id LIMIT {config.query_limit}"
+    sql += f" ORDER BY h.handset_id LIMIT {config.query_limit}"
     response = client.execute_statement(
         resourceArn=resource_arn,
         secretArn=secret_arn,
