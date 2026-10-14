@@ -3,11 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .config import AppConfig
 from .pipeline import propose, validate
 
 
@@ -61,10 +63,11 @@ def load_dynamodb_data(tag: str | None) -> list[dict[str, Any]]:
     except ImportError as exc:
         raise RuntimeError("Install boto3 before using AWS mode: python -m pip install boto3") from exc
 
-    session = boto3.Session(profile_name=os.getenv("AWS_PROFILE") or None, region_name=os.getenv("AWS_REGION", "us-east-1"))
-    table = session.resource("dynamodb").Table(os.getenv("DYNAMODB_TABLE", "legacy-modernization-demo"))
+    config = AppConfig.from_env()
+    session = boto3.Session(profile_name=config.aws_profile, region_name=config.aws_region)
+    table = session.resource("dynamodb").Table(config.dynamodb_table)
     if tag:
-        response = table.query(IndexName=os.getenv("DYNAMODB_INDEX", "tacs-index"), KeyConditionExpression=Key("tacs").eq(tag))
+        response = table.query(IndexName=config.dynamodb_index, KeyConditionExpression=Key("tacs").eq(tag))
     else:
         response = table.scan()
     return [dict(item, source="DYNAMODB") for item in response.get("Items", [])]
@@ -77,11 +80,12 @@ def load_s3_data(tag: str | None) -> list[dict[str, Any]]:
     except ImportError as exc:
         raise RuntimeError("Install boto3 before using AWS mode: python -m pip install boto3") from exc
 
-    bucket = os.getenv("S3_BUCKET")
-    key = os.getenv("S3_KEY", "legacy-records.json")
+    config = AppConfig.from_env()
+    bucket = config.s3_bucket
+    key = config.s3_key
     if not bucket:
         raise RuntimeError("Set S3_BUCKET before using the S3 provider")
-    session = boto3.Session(profile_name=os.getenv("AWS_PROFILE") or None, region_name=os.getenv("AWS_REGION", "us-east-1"))
+    session = boto3.Session(profile_name=config.aws_profile, region_name=config.aws_region)
     client = session.client("s3")
     payload = json.loads(client.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8"))
     items = payload.get("records", []) if isinstance(payload, dict) else payload
@@ -102,20 +106,24 @@ def load_rds_data(tag: str | None) -> list[dict[str, Any]]:
     except ImportError as exc:
         raise RuntimeError("Install boto3 before using AWS mode: python -m pip install boto3") from exc
 
-    session = boto3.Session(profile_name=os.getenv("AWS_PROFILE") or None, region_name=os.getenv("AWS_REGION", "us-east-1"))
+    config = AppConfig.from_env()
+    session = boto3.Session(profile_name=config.aws_profile, region_name=config.aws_region)
     client = session.client("rds-data")
-    resource_arn = os.getenv("RDS_RESOURCE_ARN")
-    secret_arn = os.getenv("RDS_SECRET_ARN")
-    database = os.getenv("RDS_DATABASE", "legacydb")
+    resource_arn = config.rds_resource_arn
+    secret_arn = config.rds_secret_arn
+    database = config.rds_database
     if not resource_arn or not secret_arn:
         raise RuntimeError("Set RDS_RESOURCE_ARN and RDS_SECRET_ARN before using the RDS provider")
 
-    sql = "SELECT id, tacs, name, status FROM legacy_records"
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", config.rds_table):
+        raise RuntimeError("RDS_TABLE must be a simple SQL identifier")
+    table = config.rds_table
+    sql = f"SELECT id, tacs, handset, cell, name, status FROM {table}"
     parameters = []
     if tag:
         sql += " WHERE tacs = :tacs"
         parameters = [{"name": "tacs", "value": {"stringValue": tag}}]
-    sql += " ORDER BY id LIMIT 100"
+    sql += f" ORDER BY id LIMIT {config.query_limit}"
     response = client.execute_statement(
         resourceArn=resource_arn,
         secretArn=secret_arn,
@@ -182,11 +190,12 @@ class Handler(BaseHTTPRequestHandler):
             tag = (query.get("tags") or query.get("tacs") or [None])[0]
             source = (query.get("source") or [None])[0]
             try:
-                if os.getenv("MODERNIZATION_DATA_MODE") == "aws" and source == "dynamodb":
+                config = AppConfig.from_env()
+                if config.data_mode == "aws" and source == "dynamodb":
                     records = load_dynamodb_data(tag)
-                elif os.getenv("MODERNIZATION_DATA_MODE") == "aws" and source == "s3":
+                elif config.data_mode == "aws" and source == "s3":
                     records = load_s3_data(tag)
-                elif os.getenv("MODERNIZATION_DATA_MODE") == "aws" and source == "rds":
+                elif config.data_mode == "aws" and source == "rds":
                     records = load_rds_data(tag)
                 else:
                     records = load_data(source, tag)

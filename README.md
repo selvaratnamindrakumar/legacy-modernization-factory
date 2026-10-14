@@ -59,6 +59,19 @@ python -m modernization_factory.server --plan .\sandbox-output\plan.json --port 
 
 Then query `http://127.0.0.1:8090/api/data?source=dynamodb&tacs=8888`.
 
+Configuration defaults and environment overrides are defined in
+`modernization_factory/config.py`. The configurable synthetic load generator
+supports 1 to 1,000,000 records for DynamoDB, S3, or RDS:
+
+```powershell
+python .\scripts\populate_test_data.py --target dynamodb --count 100
+python .\scripts\populate_test_data.py --target s3 --count 100000
+python .\scripts\populate_test_data.py --target rds --count 100000 --tacs 8888
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the presentation architecture,
+production-readiness target, security baseline, and decisions required.
+
 To create a private S3 JSON-backed record source, preview and then execute:
 
 ```powershell

@@ -88,21 +88,25 @@ function Execute-Sql([string]$Sql, [array]$Parameters = @()) {
     }
 }
 
-Execute-Sql "CREATE TABLE IF NOT EXISTS legacy_records (id VARCHAR(100) PRIMARY KEY, tacs VARCHAR(50) NOT NULL, name VARCHAR(200) NOT NULL, status VARCHAR(50) NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+Execute-Sql "CREATE TABLE IF NOT EXISTS legacy_records (id VARCHAR(100) PRIMARY KEY, tacs VARCHAR(50) NOT NULL, handset VARCHAR(50), cell VARCHAR(50), name VARCHAR(200) NOT NULL, status VARCHAR(50) NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+Execute-Sql "ALTER TABLE legacy_records ADD COLUMN IF NOT EXISTS handset VARCHAR(50)"
+Execute-Sql "ALTER TABLE legacy_records ADD COLUMN IF NOT EXISTS cell VARCHAR(50)"
 Execute-Sql "CREATE INDEX IF NOT EXISTS idx_legacy_records_tacs ON legacy_records (tacs)"
 $rows = @(
-    @{ id = "rds-8888"; tacs = "8888"; name = "RDS customer 8888"; status = "ACTIVE" },
-    @{ id = "rds-7777"; tacs = "7777"; name = "RDS customer 7777"; status = "READY" }
+    @{ id = "rds-8888"; tacs = "8888"; handset = "HS-8888"; cell = "CELL-8888"; name = "RDS customer 8888"; status = "ACTIVE" },
+    @{ id = "rds-7777"; tacs = "7777"; handset = "HS-7777"; cell = "CELL-7777"; name = "RDS customer 7777"; status = "READY" }
 )
 foreach ($row in $rows) {
     $parameters = @(
         @{ name = "id"; value = @{ stringValue = $row.id } },
         @{ name = "tacs"; value = @{ stringValue = $row.tacs } },
+        @{ name = "handset"; value = @{ stringValue = $row.handset } },
+        @{ name = "cell"; value = @{ stringValue = $row.cell } },
         @{ name = "name"; value = @{ stringValue = $row.name } },
         @{ name = "status"; value = @{ stringValue = $row.status } },
         @{ name = "payload"; value = @{ stringValue = '{"origin":"accumulo","mapping":"rds"}' } }
     )
-    Execute-Sql "INSERT INTO legacy_records (id,tacs,name,status,payload) VALUES (:id,:tacs,:name,:status,CAST(:payload AS JSONB)) ON CONFLICT (id) DO UPDATE SET tacs=EXCLUDED.tacs,name=EXCLUDED.name,status=EXCLUDED.status,payload=EXCLUDED.payload" $parameters
+    Execute-Sql "INSERT INTO legacy_records (id,tacs,handset,cell,name,status,payload) VALUES (:id,:tacs,:handset,:cell,:name,:status,CAST(:payload AS JSONB)) ON CONFLICT (id) DO UPDATE SET tacs=EXCLUDED.tacs,handset=EXCLUDED.handset,cell=EXCLUDED.cell,name=EXCLUDED.name,status=EXCLUDED.status,payload=EXCLUDED.payload" $parameters
 }
 
 Write-Host "RDS demo is ready." -ForegroundColor Green
